@@ -146,14 +146,20 @@ class MotorControlTask:
 
                 # Write data samples to shares (for other tasks using them)
                 # Ensure values being put are integers
-                self.time_sh.put(t)
-                self.left_pos_sh.put(int(pL))
-                self.right_pos_sh.put(int(pR))
+                self.time_sh.put(int(t))
+                self.left_pos_sh.put(float(pL))
+                self.right_pos_sh.put(float(pR))
                 self.left_vel_sh.put(float(vL))
                 self.right_vel_sh.put(float(vR))
                 
+                # print("Motor Task Shares:")
+                # print(self.time_sh.get())
                 # print(self.left_pos_sh.get())
+                # print(self.right_pos_sh.get())
+                # print(self.left_vel_sh.get())
                 # print(self.right_vel_sh.get())
+
+                yield self.state
 
                 # Disable if mtr_enable flag is cleared or abort is triggered
                 if not self.mtr_enable.get() or self.abort.get():

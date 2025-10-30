@@ -27,7 +27,7 @@ run_count = 0               # Number of runs
 override = False            # Set if user wants to overwrite existing run
 _continue = False           # Second option, if user doesn't want to overwrite
 question = False           # Set when option to override is presented
-effort_mode = True         # True for effort mode, False for velocity mode
+control_mode = True         # True for effort mode, False for velocity mode
 current_setpoint = 0       # Current velocity setpoint in ticks/second
 first = True
 done = False
@@ -154,11 +154,6 @@ def eff_to_key(eff):
 def auto_run_sequence(efforts):
     global ser, runs, run_count
 
-    # Ensure we are in effort mode
-    if not effort_mode:
-        ser.write(b'e')
-        sleep(0.1)
-
     try:
         for eff in efforts:
             key = eff_to_key(eff)
@@ -189,12 +184,30 @@ def auto_run_sequence(efforts):
             ser.write(b's')
             sleep(0.1)
 
-            # Read header line with effort and size
+            # Read header line and parse flexibly for effort or velocity mode
             header = ser.readline().decode().strip()
+            parts = header.split(',')
             try:
-                _mode_str, _control_val_str, _size_str = header.split(',')
-                _control_val = int(_control_val_str)
-                _size = int(_size_str)
+                if parts[0] in ('E', 'e'):
+                    # Effort mode header: E,effort,size
+                    if len(parts) < 3:
+                        raise ValueError("not enough fields for effort header")
+                    _mode_str = parts[0]
+                    _control_val = float(parts[1])
+                    _size = int(parts[2])
+                    params = None
+                elif parts[0] in ('V', 'v'):
+                    # Velocity mode header: V,setpoint,kp,ki,size
+                    if len(parts) < 5:
+                        raise ValueError("not enough fields for velocity header")
+                    _mode_str = parts[0]
+                    _control_val = float(parts[1])
+                    kp = float(parts[2])
+                    ki = float(parts[3])
+                    _size = int(parts[4])
+                    params = {'kp': kp, 'ki': ki}
+                else:
+                    raise ValueError("unknown mode in header")
             except Exception as e:
                 print(f"Failed to parse header '{header}': {e}")
                 continue
@@ -202,7 +215,14 @@ def auto_run_sequence(efforts):
             run_count += 1
             run_name = f'run{run_count}'
             runs[run_name] = create_run(_control_val, _size)
-            print(f"Created {run_name} (eff={_control_val}, size={_size})")
+            if params:
+                runs[run_name]['params'] = params
+            runs[run_name]['mode'] = _mode_str
+            # Provide informative print depending on mode
+            if _mode_str in ('E', 'e'):
+                print(f"Created {run_name} (eff={_control_val}, size={_size})")
+            else:
+                print(f"Created {run_name} (V) sp={_control_val} Kp={kp:.2f} Ki={ki:.2f} size={_size}")
 
             line_num = 0
             while line_num <= _size - 10:
@@ -249,20 +269,20 @@ def auto_run_sequence(efforts):
 
 # Function to run an automated closed-loop test
 def run_closed_loop_test():
-    global ser, runs, run_count, current_setpoint, effort_mode, streaming, running
+    global ser, runs, run_count, current_setpoint, control_mode, streaming, running
 
-    if effort_mode:
+    if control_mode:
         print("Switching to velocity mode for closed-loop test...")
         ser.write(b'e')
-        effort_mode = False
+        control_mode = False
         sleep(0.1)
 
     try:
         # Ensure we are in velocity mode
-        # if not effort_mode:
+        # if not control_mode:
         #     print("Switching to velocity mode...")
         #     ser.write(b'e')
-        #     effort_mode = False
+        #     control_mode = False
         #     sleep(0.1)
 
         # Get test parameters from user
@@ -422,8 +442,8 @@ while True:
                     print("Cannot change control mode while streaming")
                 else:
                     ser.write(b'e')
-                    effort_mode = not effort_mode
-                    mode_str = "effort" if effort_mode else "velocity"
+                    control_mode = not control_mode
+                    mode_str = "effort" if control_mode else "velocity"
                     print(f"Switched to {mode_str} control mode")
 
             elif key == 't':
@@ -431,7 +451,7 @@ while True:
                     print("Cannot set velocity setpoint while test is running")
                 elif streaming:
                     print("Cannot set velocity setpoint while streaming")
-                elif effort_mode:
+                elif control_mode:
                     print("Must be in velocity mode to set setpoint")
                 else:
                     try:
@@ -498,8 +518,8 @@ while True:
                     x = df_clean["_time"]
                     y = df_clean["_left_vel"]
                     plt.plot(x, y)
-                    plt.xlabel("Time")
-                    plt.ylabel("Left velocity")
+                    plt.xlabel("Time, [ms]")
+                    plt.ylabel("Left velocity, [rad/s]")
                     eff_val = runs[run_name].get('eff', runs[run_name].get('eff:', 'unknown'))
                     # instead of plt.show()
                     plt.savefig(f"runs/{run_name}_effort_{eff_val}_left_vel.png")
@@ -549,9 +569,9 @@ while True:
                             label = f"{run_name} (E) eff={control_val}"
                             
                         plt.plot(df_clean["_time"], df_clean["_left_vel"], label=label)
-                        
-                    plt.xlabel("Time, ms")
-                    plt.ylabel("Left velocity, counts/s")
+
+                    plt.xlabel("Time, [ms]")
+                    plt.ylabel("Left velocity, [rad/s]")
                     plt.legend()
                     # instead of plt.show()
                     plt.savefig(f"runs/all_runs_velocity_response.png")
@@ -596,7 +616,7 @@ while True:
                         mode = header[0]  # 'E' for effort, 'V' for velocity
                         
                         if mode == 'E':
-                            control_val = int(header[1])  # effort value
+                            control_val = float(header[1])  # effort value
                             size = int(header[2])
                             params = None
                         else:  # Velocity mode

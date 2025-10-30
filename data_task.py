@@ -88,9 +88,11 @@ class DataCollectionTask:
 
             ### 2: COLLECTING STATE --------------------------------------------
             elif (self.state == self.S2_COLLECTING_DATA):
+                # print("Collecting data...")
+                
                 # Check if sample queue is full
-                if not self.time_q.full() and not self.abort.get():
-                    # print("Collecting data...")
+                if not self.time_q.full() and not self.abort.get():    
+                    # Move data from shares into queues
                     self.time_q.put(self.time_sh.get())
                     self.left_pos_q.put(self.left_pos_sh.get())
                     self.right_pos_q.put(self.right_pos_sh.get())

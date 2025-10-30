@@ -151,7 +151,7 @@ class UITask:
                         pass
                         # Test already running
                     else:
-                        print("Starting new test")
+                        # print("Starting new test")
                         self.abort.put(0)
                         self.mtr_enable.put(1)
                         self.col_start.put(1)

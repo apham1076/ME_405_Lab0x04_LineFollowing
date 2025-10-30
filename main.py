@@ -62,20 +62,20 @@ def main():
     # Shared Variables: create shares and queues (inter-task communication)
     # Create Shares...
     time_sh = task_share.Share('H', name='Time share')
-    left_pos_sh = task_share.Share('l', name= 'Left motor position share')
-    right_pos_sh = task_share.Share('l', name= 'Right motor position share')
+    left_pos_sh = task_share.Share('f', name= 'Left motor position share')
+    right_pos_sh = task_share.Share('f', name= 'Right motor position share')
     left_vel_sh = task_share.Share('f', name= 'Left motor velocity share')
     right_vel_sh = task_share.Share('f', name= 'Right motor velocity share')
 
     # Create Queues...
     time_q = task_share.Queue('H', size=MAX_SAMPLES, name='Time share')
-    left_pos_q = task_share.Queue('l', size=MAX_SAMPLES, name= 'Left motor position share')
-    right_pos_q = task_share.Queue('l', size=MAX_SAMPLES, name= 'Right motor position share')
+    left_pos_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Left motor position share')
+    right_pos_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Right motor position share')
     left_vel_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Left motor velocity share')
     right_vel_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Right motor velocity share')
     
     # Motor control values
-    eff = task_share.Share('b', name='Requested Effort')  # Changed to 'b' for signed 8-bit to handle negative values
+    eff = task_share.Share('f', name='Requested Effort')  # Changed to 'b' for signed 8-bit to handle negative values
     setpoint = task_share.Share('h', name='Velocity Setpoint')  # 'h' for signed 16-bit to handle larger velocity values
     kp = task_share.Share('f', name='Proportional Gain')  # 'f' for float to store Kp
     ki = task_share.Share('f', name='Integral Gain')  # 'f' for float to store Ki
@@ -123,14 +123,14 @@ def main():
                                  control_mode, setpoint, kp, ki)
 
 	# Create costask.Task WRAPPERS. (If trace is enabled for any task, memory will be allocated for state transition tracing, and the application will run out of memory after a while and quit. Therefore, use tracing only for debugging and set trace to False when it's not needed)
-    _motor_task = cotask.Task(motor_task_obj.run, name='Motor Control Task', priority=3, period=10, profile=True, trace=False)
+    _motor_task = cotask.Task(motor_task_obj.run, name='Motor Control Task', priority=3, period=4, profile=True, trace=False)
     
-    _data_collection_task = cotask.Task(data_task_obj.run, name='Data Collection Task', priority=2, period=10, profile=True, trace=False)
-    
-    _ui_task = cotask.Task(ui_task_obj.run, name='User Interface Task', priority=0, period=100, profile=True, trace=False)
+    _data_collection_task = cotask.Task(data_task_obj.run, name='Data Collection Task', priority=2, period=6, profile=True, trace=False)
+
+    _ui_task = cotask.Task(ui_task_obj.run, name='User Interface Task', priority=0, period=40, profile=True, trace=False)
 
     _stream_task = cotask.Task(stream_task_obj.run, name='Stream Task', priority=1, period=20, profile=True, trace=False)
-    
+
 	# Now add (append) the tasks to the scheduler list
     cotask.task_list.append(_motor_task)
     cotask.task_list.append(_data_collection_task)
@@ -151,8 +151,8 @@ def main():
             break
 
     # Diagnostics on exit: print a table of task data and a table of shared information data
-    # print("\n=== Scheduler Halted ===")
-    # print('\n' + str(cotask.task_list))
+    print("\n=== Scheduler Halted ===")
+    print('\n' + str(cotask.task_list))
     # print(task_share.show_all())
     # print(_ui_task.get_trace())
     # print(_motor_task.get_trace())

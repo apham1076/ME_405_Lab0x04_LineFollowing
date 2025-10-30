@@ -44,18 +44,22 @@ class Encoder:
             self.velocity = self.delta*1e6 / self.dt
         else:
             self.velocity = 0
+
+        self.position = self.position*2*3.14159265/1440  # position in [rad]
+        self.velocity = self.velocity*2*3.14159265/1440  # velocity in [rad/s]
+
         self.prev_time = curr_time
         self.prev_count = curr_count
             
     def get_position(self):
         '''Returns the most recently updated value of position as determined
            within the update() method'''
-        return self.position        # position in encoder counts
+        return self.position  # position in [rad]
             
     def get_velocity(self):
         '''Returns a measure of velocity using the the most recently updated
            value of delta as determined within the update() method'''
-        return self.velocity
+        return self.velocity  # velocity in [rad/s]
         # return self.delta*1e6 // self.dt if self.dt !=0 else 0
                # velocity in [encoder counts/second]
     
