@@ -109,10 +109,11 @@ class MotorControlTask:
                 self.left_vel_sh.put(int(vL))
                 self.right_vel_sh.put(int(vR))
 
-                # Disable if mtr_enable flag is cleared and return to WAIT state
+                # Disable if mtr_enable flag is cleared or abort is triggered
                 if not self.mtr_enable.get() or self.abort.get():
                     self.left_motor.disable()
                     self.right_motor.disable()
+                    self.abort.put(0)  # Reset abort flag after handling it
                     self.state = self.S1_WAIT_FOR_EFF
             
             yield self.state

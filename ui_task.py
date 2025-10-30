@@ -145,13 +145,10 @@ class UITask:
 
                 # 'k' → KILL (STOP)
                 elif cmd == 'k':
-                    self.abort.put(1)
-                    self.mtr_enable.put(0)
-                    self.col_start.put(0)
-
-                    # Tell PC test is testing is done
-                    self.ser.write(b'q')
-                    # Motors disabled and test stopped
+                    self.abort.put(1)  # Set abort flag first
+                    self.mtr_enable.put(0)  # Then disable motors
+                    self.col_start.put(0)  # Stop data collection
+                    self.ser.write(b'q')  # Tell PC test is done
 
                 # 's' → STREAM
                 elif cmd == 's':

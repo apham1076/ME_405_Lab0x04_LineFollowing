@@ -26,18 +26,21 @@ runs = {}                   # Dict to contain runs
 run_count = 0               # Number of runs
 override = False            # Set if user wants to overwrite existing run
 _continue = False           # Second option, if user doesn't want to overwrite
-question = False            # Set when option to override is presented
+question = False           # Set when option to override is presented
+current_setpoint = 0       # Current velocity setpoint in ticks/second
 first = True
 done = False
 mode = 1                    # 1, 2, 3 = straight, pivot, arc
 
 user_prompt = '''\r\nCommand keys:
-    0-9,a  : Set effort (0-100%)
+    0-9,a  : Set effort (0-100%) for open-loop control
+    p      : Set velocity setpoint (ticks/s) for closed-loop control
     g      : GO (start test)
     k      : Kill (stop) motors
+    r      : Run automated sequence (0 to 100% by 10%)
+    x      : Plot all runs' left velocity
     s      : Stream data
     ----  o      : Override existing run
-    ----  p      : Do nothing
     m      : Toggle mode (Set to straight by default)
     d      : Print CSV data to Terminal
     h      : Help / show this menu
@@ -69,42 +72,10 @@ def has_eff(runs, eff_value):
     return False
 
 
-def clean_zeros(df, cols=None, mode='all'):
+def clean_data(df, cols=None, mode='all'):
     """
-    Remove rows containing zeros from a DataFrame.
-
-    Parameters:
-      df: pandas.DataFrame
-      cols: list of columns to check. If None, defaults to all motor_data columns.
-      mode: 'all' -> remove rows where ALL specified cols are zero;
-            'any' -> remove rows where ANY specified cols are zero.
-
-    Returns: (cleaned_df, removed_count)
-    """
-    if cols is None:
-        cols = ["_time", "_left_pos", "_right_pos", "_left_vel", "_right_vel"]
-
-    # Ensure columns exist
-    cols = [c for c in cols if c in df.columns]
-    if not cols:
-        return df, 0
-
-    # Build mask: True for rows to KEEP
-    if mode == 'any':
-        keep_mask = ~(df[cols] == 0).any(axis=1)
-    else:
-        # default 'all'
-        keep_mask = ~(df[cols] == 0).all(axis=1)
-
-    removed = len(df) - int(keep_mask.sum())
-    cleaned = df.loc[keep_mask].reset_index(drop=True)
-    return cleaned, removed
-
-
-def remove_trailing_zeros(df, cols=None, mode='all'):
-    """
-    Remove trailing rows containing zeros from a DataFrame while preserving leading zeros.
-
+    Clean DataFrame by removing all zero rows except initial zeros up to the first non-zero data.
+    
     Parameters:
       df: pandas.DataFrame
       cols: list of columns to check. If None, defaults to all motor_data columns.
@@ -127,19 +98,36 @@ def remove_trailing_zeros(df, cols=None, mode='all'):
     else:
         zero_mask = (df[cols] == 0).all(axis=1)
 
-    # Find last non-zero row index (i.e., keep up to that index)
+    # Find the indices of non-zero rows
     nonzero_idx = (~zero_mask).to_numpy().nonzero()[0]
+    
     if len(nonzero_idx) == 0:
-        # all rows are zero -> keep first row (leading zero) and drop the rest
+        # All rows are zero -> keep first row only
         if len(df) <= 1:
             return df.reset_index(drop=True), 0
         cleaned = df.iloc[:1].reset_index(drop=True)
         removed = len(df) - 1
         return cleaned, removed
 
+    # Find first and last non-zero indices
+    first_nonzero = int(nonzero_idx[0])
     last_nonzero = int(nonzero_idx[-1])
-    # keep everything up to last_nonzero (inclusive)
-    cleaned = df.iloc[: last_nonzero + 1].reset_index(drop=True)
+
+    # Keep all rows from start up to first non-zero (preserve leading zeros)
+    # plus all non-zero rows up to the last non-zero row
+    cleaned = df.iloc[:last_nonzero + 1].copy()
+    
+    # Remove any zero rows between first and last non-zero (excluding leading zeros)
+    if first_nonzero > 0:  # If we have leading zeros
+        # Keep all rows up to first_nonzero (leading zeros)
+        # Then only keep non-zero rows after that
+        mask = pd.Series(True, index=cleaned.index)
+        mask[first_nonzero:] = ~zero_mask[first_nonzero:last_nonzero + 1]
+        cleaned = cleaned[mask].reset_index(drop=True)
+    else:
+        # No leading zeros, just keep non-zero rows
+        cleaned = cleaned[~zero_mask[:last_nonzero + 1]].reset_index(drop=True)
+
     removed = len(df) - len(cleaned)
     return cleaned, removed
 
@@ -226,6 +214,12 @@ def auto_run_sequence(efforts):
                     line_num += 1
 
             print(f"Finished streaming for {run_name}")
+            
+            if run_count == 10:
+                print(f"Automated test is finished ({run_count} runs completed). Hit 'x' to plot data.")
+
+
+
     except KeyboardInterrupt:
         print("\nAutomated sequence interrupted by user (Ctrl-C). Sending kill and closing serial port.")
         try:
@@ -244,6 +238,13 @@ def auto_run_sequence(efforts):
             return
 
 
+
+# Create 'runs' directory if it doesn't exist
+try:
+    os.makedirs('runs', exist_ok=True)
+    print("Output directory 'runs' is ready")
+except Exception as e:
+    print(f"Warning: Could not create 'runs' directory: {e}")
 
 # Establish Bluetooth connection
 try:
@@ -279,6 +280,7 @@ while True:
                 elif streaming:
                     print("Data is streaming.")
                 else:
+                    print("Starting test...")
                     running = True
                     ser.write(b'g')
             elif key == 'k':
@@ -287,7 +289,7 @@ while True:
                     ser.write(b'k')
                     print("End test. Stop motors")
                     # print(user_prompt)
-                    running = False
+                    # running = False
                 else:
                     print("Motors are already off")
             elif key == 's':
@@ -339,10 +341,26 @@ while True:
                     print("Option not available")
 
             elif key == 'p':
-                if streaming and question:
-                    _continue = True
+                if running:
+                    print("Cannot set setpoint while test is running")
+                elif streaming:
+                    print("Cannot set setpoint while streaming")
                 else:
-                    print("Option not available")
+                    try:
+                        # Get setpoint from user
+                        setpoint = input("Enter velocity setpoint (ticks/s): ")
+                        setpoint = int(setpoint)
+                        current_setpoint = setpoint
+                        # Send setpoint to Romi - format: 'pXXXX' where XXXX is setpoint
+                        # Negative values are handled by sending 'n' instead of 'p'
+                        if setpoint < 0:
+                            cmd = f"n{abs(setpoint):04d}"
+                        else:
+                            cmd = f"p{setpoint:04d}"
+                        ser.write(cmd.encode())
+                        print(f"Setpoint set to {setpoint} ticks/s. Enter 'g' to begin test.")
+                    except ValueError:
+                        print("Invalid input. Please enter a number.")
 
             elif key == 'd':
                 # Plot and save the latest run's motor_data to CSV
@@ -351,8 +369,8 @@ while True:
                 else:
                     run_name = f'run{run_count}'
                     df = runs[run_name]["motor_data"]
-                    # Remove trailing zero rows (preserve leading zeros)
-                    df_clean, removed = remove_trailing_zeros(df, mode='all')
+                    # Clean data: remove zeros except leading zeros
+                    df_clean, removed = clean_data(df, mode='all')
                     if removed:
                         print(f"Removed {removed} all-zero rows from {run_name} before plotting/saving")
                     x = df_clean["_time"]
@@ -360,19 +378,24 @@ while True:
                     plt.plot(x, y)
                     plt.xlabel("Time")
                     plt.ylabel("Left velocity")
+                    eff_val = runs[run_name].get('eff', runs[run_name].get('eff:', 'unknown'))
                     # instead of plt.show()
-                    plt.savefig(f"runs/{run_name}_left_vel.png")
+                    plt.savefig(f"runs/{run_name}_effort_{eff_val}_left_vel.png")
                     plt.close()
 
                     # Save motor_data to CSV inside the 'runs' folder. Try to get effort value from either 'eff' or 'eff:' key.
-                    eff_val = runs[run_name].get('eff', runs[run_name].get('eff:', 'unknown'))
-                    try:
-                        os.makedirs('runs', exist_ok=True)
-                        filename = os.path.join('runs', f"{run_name}_eff{eff_val}.csv")
-                        df_clean.to_csv(filename, index=False)
-                        print(f"Saved motor_data to {filename}")
-                    except Exception as e:
-                        print(f"Failed to save CSV: {e}")
+                    # try:
+                    #     os.makedirs('runs', exist_ok=True)
+                    #     filename = os.path.join('runs', f"{run_name}_eff{eff_val}.csv")
+                    #     df_clean.to_csv(filename, index=False)
+                    #     print(f"Saved motor_data to {filename}")
+                    # except Exception as e:
+                    #     print(f"Failed to save CSV: {e}")
+                    
+                    filename = os.path.join('runs', f"{run_name}_eff{eff_val}.csv")
+                    df_clean.to_csv(filename, index=False)
+                    print(f"Saved motor_data to {filename}")
+                    print(user_prompt)
 
             elif key == 'r':
                 # Run automated sequence for efforts 0..100 step 10
@@ -388,8 +411,8 @@ while True:
                     plt.figure()
                     for run_name, meta in runs.items():
                         df = meta["motor_data"]
-                        # Remove trailing zero rows (preserve leading zeros) before plotting
-                        df_clean, removed = remove_trailing_zeros(df, mode='all')
+                        # Clean data: remove zeros except leading zeros
+                        df_clean, removed = clean_data(df, mode='all')
                         if removed:
                             print(f"Removed {removed} all-zero rows from {run_name} before plotting")
                         eff_val = meta.get('eff', meta.get('eff:', 'unknown'))
@@ -406,6 +429,10 @@ while True:
                 print(user_prompt)
             else:
                 print(f"Unknown command '{key}'. Press 'h' for help.")
+
+            # Clear any remaining input
+            if ser.in_waiting:  
+                ser.read()
         
         else:
             # Check for bytes waiting
