@@ -34,7 +34,8 @@ class UITask:
                  col_start, col_done, mtr_enable, stream_data, abort,
                  eff, driving_mode, setpoint, kp, ki, control_mode,
                  uart5, battery,
-                 time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q):
+                 time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q,
+                 lf_enable=None, ir_cmd=None):
         
         # Flags
         self.col_start = col_start
@@ -50,6 +51,8 @@ class UITask:
         self.kp = kp  # Share for proportional gain
         self.ki = ki  # Share for integral gain
         self.control_mode = control_mode  # Share for control mode (effort/velocity)
+        self.lf_enable = lf_enable  # Share for line follower enable
+        self.ir_cmd = ir_cmd  # Share for IR command
 
         # Serial interface (USB virtual COM port)
         # self.ser = USB_VCP()
@@ -252,6 +255,17 @@ class UITask:
                     v_batt = self.battery.read_voltage()
                     voltage_msg = f"{v_batt:.2f}\n"
                     self.ser.write(voltage_msg.encode()) # send over bluetooth UART
+                
+                elif cmd == 'w':   # Calibrate on WHITE background
+                    if self.ir_cmd: self.ir_cmd.put(1)
+
+                elif cmd == 'b':   # Calibrate on BLACK line
+                    if self.ir_cmd: self.ir_cmd.put(2)
+
+                elif cmd == 'l':   # Toggle line-follow (on/off)
+                    if self.lf_enable:
+                        self.lf_enable.put(0 if self.lf_enable.get() else 1)
+
 
                 # Anything else → ignore, Shouldn't need to worry about other commmands handled by PC
                 else:
