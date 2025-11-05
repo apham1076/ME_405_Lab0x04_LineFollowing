@@ -20,7 +20,10 @@
 # ==============================================================================
 
 ### TO-DO:
-# 
+# Check period and priorty
+# Use Bluetooth module to send commands from Putty and automate data collection and plotting in Python
+# For plotting, save data for plots, and overlay them, check units
+#
 
 '''
 Bluetooth related changes:
@@ -36,85 +39,68 @@ Motor task will remain unchanged
 import gc
 import cotask
 import task_share
-from pyb import Pin, Timer, UART, ADC
+from pyb import Pin, UART
 from motor import Motor
 from encoder import Encoder
-from IR_sensor import IR_sensor_single, IR_sensor_array
+from battery_droop import Battery
+from IR_sensor import IRArray
 from motor_task import MotorControlTask
 from data_task import DataCollectionTask
 from ui_task import UITask
 from stream_task import StreamTask
+from steering_task import SteeringTask
 
 
 def main():
-    print("\r\n=== ME405 Lab 0x02 Scheduler Start ===")
+    print("\r\n=== ME405 Lab 0x03 Scheduler Start ===")
     MAX_SAMPLES = 250
     
     # Hardware Setup:
-
-    # Initialize Pin and ADC objects
-    tim6 = Timer(6, freq=10)
-
-    PC2 = Pin(Pin.cpu.C2, mode=Pin.IN)
-    PC3 = Pin(Pin.cpu.C3, mode=Pin.IN)
-    PC4 = Pin(Pin.cpu.C4, mode=Pin.IN)
-    PC5 = Pin(Pin.cpu.C5, mode=Pin.IN)
-
-    adc1 = ADC(PC2)
-    adc2 = ADC(PC3)
-    adc3 = ADC(PC4)
-    adc4 = ADC(PC5)
-
-    adcs = [adc1, adc2, adc3, adc4]
-
     # Create motor and encoder objects
     left_motor = Motor(Pin.cpu.B1, Pin.cpu.B5, Pin.cpu.B3, 3, 4)
     right_motor = Motor(Pin.cpu.B0, Pin.cpu.C0, Pin.cpu.C1, 3, 3)
     left_encoder = Encoder(1, Pin.cpu.A8, Pin.cpu.A9)
     right_encoder = Encoder(2, Pin.cpu.A0, Pin.cpu.A1)
+    battery = Battery(Pin.cpu.A4) # battery voltage measurement object
+    tim6 = Timer(6, freq=1000) # timer for ADC sampling (can be reused by the IR array)
+    ir_pins = [Pin.cpu.xx, Pin.cpu.xy, Pin.cpu.xz, Pin.cpu.xw, Pin.cpu.xv]  # replace xx, xy, xz, xw, xv with actual pin names
+    ir_array = IRArray(ir_pins, tim6, samples=100)  # IR sensor array object
+	
+    # -----------------------------------------------------------------------
+    ### Shared Variables: create shares and queues (inter-task communication)
 
-    # Create IR sensor objects
-    IR1 = IR_sensor_single(adc1, tim6)
-    IR2 = IR_sensor_single(adc2, tim6)
-    IR3 = IR_sensor_single(adc3, tim6)
-    IR4 = IR_sensor_single(adc4, tim6)
-
-    IR_arr = IR_sensor_array(adcs, tim6)
-
-    # Shared Variables: create shares and queues (inter-task communication)
-    # Create Shares...
+    # Data Shares...
     time_sh = task_share.Share('H', name='Time share')
     left_pos_sh = task_share.Share('f', name= 'Left motor position share')
     right_pos_sh = task_share.Share('f', name= 'Right motor position share')
     left_vel_sh = task_share.Share('f', name= 'Left motor velocity share')
     right_vel_sh = task_share.Share('f', name= 'Right motor velocity share')
-
-    # Create Queues...
-    time_q = task_share.Queue('H', size=MAX_SAMPLES, name='Time share')
-    left_pos_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Left motor position share')
-    right_pos_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Right motor position share')
-    left_vel_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Left motor velocity share')
-    right_vel_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Right motor velocity share')
     
-    # Motor control values
-    eff = task_share.Share('f', name='Requested Effort')  # Changed to 'b' for signed 8-bit to handle negative values
+    # Motor control shares...
+    eff = task_share.Share('f', name='Requested Effort')  # float effort percent
     setpoint = task_share.Share('h', name='Velocity Setpoint')  # 'h' for signed 16-bit to handle larger velocity values
     kp = task_share.Share('f', name='Proportional Gain')  # 'f' for float to store Kp
     ki = task_share.Share('f', name='Integral Gain')  # 'f' for float to store Ki
-
-    # Initialize control parameters
+    # Initialize motor control shares
+    eff.put(0)  # Start with zero effort
+    setpoint.put(0)  # Start with zero setpoint
     kp.put(0)  # Start with zero gains
     ki.put(0)
-    setpoint.put(0)  # Start with zero setpoint
-    eff.put(0)  # Start with zero effort
 
-    # Mode settings
+    # Driving mode and control mode shares...
     driving_mode = task_share.Share('B', name='Driving Mode')  # straight line, pivot, or arc
     control_mode = task_share.Share('B', name='Control Mode')  # 0: effort mode, 1: velocity mode
-    
-    # Initialize modes
+    # Initialize driving and control mode shares
+    driving_mode.put(1)  # Start in straight line mode
     control_mode.put(0)  # Start in effort (open-loop) mode
-    
+
+    # line following shares...
+    lf_enable   = task_share.Share('B', name='LineFollow Enable'); lf_enable.put(0)
+    left_eff_sh = task_share.Share('f', name='LF Left Effort');    left_eff_sh.put(0.0)
+    right_eff_sh= task_share.Share('f', name='LF Right Effort');   right_eff_sh.put(0.0)
+    ir_cmd      = task_share.Share('B', name='IR Calibrate Cmd');  ir_cmd.put(0)
+
+
     # Boolean flags
     col_start = task_share.Share('B', name='Start Collection Flag')
     col_done = task_share.Share('B', name='Collection Done Flag')
@@ -122,17 +108,26 @@ def main():
     stream_data = task_share.Share('B', name='Stream Data Flag')
     abort = task_share.Share('B', name='Abort Flag')
 
+    # Data Queues...
+    time_q = task_share.Queue('H', size=MAX_SAMPLES, name='Time share')
+    left_pos_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Left motor position share')
+    right_pos_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Right motor position share')
+    left_vel_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Left motor velocity share')
+    right_vel_q = task_share.Queue('f', size=MAX_SAMPLES, name= 'Right motor velocity share')
+    # -----------------------------------------------------------------------
+
     # Create UART object
     uart5 = UART(5, 115200)
 
-    # Create Task Objects (since tasks are classes)
-    ui_task_obj = UITask(col_start, col_done, mtr_enable, stream_data,
-                         uart5, abort, eff, driving_mode, setpoint, kp, ki, control_mode,
+    # Create Task Objects (since tasks are classes)    
+    ui_task_obj = UITask(col_start, col_done, mtr_enable, stream_data, abort,
+                         eff, driving_mode, setpoint, kp, ki, control_mode,
+                         uart5, battery,
                          time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q)
-    
+
     motor_task_obj = MotorControlTask(left_motor, right_motor,
                                       left_encoder, right_encoder,
-                                      IR_arr,
+                                      battery,
                                       eff, mtr_enable, abort, driving_mode, setpoint, kp, ki, control_mode,
                                       time_sh, left_pos_sh, right_pos_sh, left_vel_sh, right_vel_sh)
         
@@ -144,6 +139,11 @@ def main():
     stream_task_obj = StreamTask(eff, col_done, stream_data, uart5,
                                  time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q,
                                  control_mode, setpoint, kp, ki)
+    
+    steering_task_obj = SteeringTask(ir_array, battery,
+                                 lf_enable, ir_cmd,
+                                 left_eff_sh, right_eff_sh)
+
 
 	# Create costask.Task WRAPPERS. (If trace is enabled for any task, memory will be allocated for state transition tracing, and the application will run out of memory after a while and quit. Therefore, use tracing only for debugging and set trace to False when it's not needed)
     _motor_task = cotask.Task(motor_task_obj.run, name='Motor Control Task', priority=3, period=4, profile=True, trace=False)
@@ -154,11 +154,18 @@ def main():
 
     _stream_task = cotask.Task(stream_task_obj.run, name='Stream Task', priority=1, period=20, profile=True, trace=False)
 
+    _steering_task = cotask.Task(steering_task_obj.run,
+                             name='Steering Task',
+                             priority=2, period=10,
+                             profile=True, trace=False)
+
+
 	# Now add (append) the tasks to the scheduler list
     cotask.task_list.append(_motor_task)
     cotask.task_list.append(_data_collection_task)
     cotask.task_list.append(_ui_task)
     cotask.task_list.append(_stream_task)
+    cotask.task_list.append(_steering_task)
 
     ### The scheduler is ready to start ###
 
