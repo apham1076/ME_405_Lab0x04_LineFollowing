@@ -3,8 +3,8 @@
 # ==============================================================================
 # UITask
 # ------------------------------------------------------------------------------
-# Reads user input from USB serial (PuTTY), interprets commands, and sets
-# control flags and motor effort shares accordingly.
+# Reads user input from Bluetooth UART5 (PC test.py), interprets commands, and
+# sets control flags and motor effort shares accordingly.
 # Allows the user to:
 #   - set motor effort
 #   - start a new step-response test (GO)
@@ -16,10 +16,8 @@
 # from pyb import USB_VCP
 # from pyb import UART
 
-# Q: Will not worry about sending commands mid-test since already checking for that using send/receive flags?
-
 class UITask:
-    """Receive user command from PC and sets flags to run and stop motors"""
+    """Reads user input from Bluetooth UART (UART5), interprets commands, and sets. Reads user input from the Bluetooth UART (UART5). Commands are sent from PC via test.py (VS Code terminal)."""
 
     # The states of the FSM
     S0_INIT = 0

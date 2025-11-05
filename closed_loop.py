@@ -20,6 +20,7 @@ class ClosedLoop:
         self.integrator = 0.0
         self.last_time = ticks_ms()
         self.output = 0.0
+        self.last_output = 0.0
 
         self.battery = battery  # battery object for droop compensation
 
@@ -48,10 +49,10 @@ class ClosedLoop:
         now = ticks_ms()
         dt_ms = ticks_diff(now, self.last_time)
         
-        # Ignore first run or very long delays
-        if dt_ms > 1000 or dt_ms <= 0:  # > 1 second or negative
-            self.last_time = now
-            return 0.0
+        # If task paused too long, hold last output instead of cutting to zero
+        if dt_ms > 1000:
+            self.last_time = now # reset time
+            return self.last_output # hold last output
         
         dt = dt_ms / 1000.0  # Convert to seconds
         self.last_time = now
@@ -85,4 +86,5 @@ class ClosedLoop:
         u = max(min(u, self.effort_max), self.effort_min)
         
         self.output = u
+        self.last_output = u
         return u

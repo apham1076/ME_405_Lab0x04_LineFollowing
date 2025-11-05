@@ -1,92 +1,125 @@
 from pyb import Pin, ADC, Timer
 import array
 
-class IR_sensor_single:
-    '''Reads from a single ADC pin and calibrates for black and white'''
-    def __init__(self,
-                 adc: ADC,
-                 tim: Timer,
-                 samples=100):
-        
-        # Initialization
-        self.adc = adc
-        self.tim = tim
-        self.samples = samples
-        self.black = 0
-        self.white = 0
-
-    def calibrate(self, color: str):
-        # Create buffer to store values
-        buf = array.array('H', [0] * self.samples)
-        self.adc.read_timed(self.buf, self.tim)
-        avg = sum(buf) / len(buf)
-        if color == 'b':
-            self.black = avg
-        else:
-            self.white = avg
-        return avg
-    
-
-    def read(self):
-        r = self.adc.read()
-        b = self.black
-        w = self.white
-
-        # Normalize values
-        denom = b - w
-        if denom == 0:
-            n = 0
-        else:
-            n = r - w / denom
-
-        # Saturation
-        if n > 1:
-            n = 1.0
-        elif n < 0:
-            n = 0.0
-
-        return n
-
-
 class IRArray:
-    """Reads from an array of ADC pins and computes line centroid."""
-
-    def __init__(self, adcs, tim, sensor_index=None, samples=100):
-        self.adcs = list(adcs)
+    """
+    IR sensor array driver with per-channel calibration and centroid calculation.
+    - Pins are specified by the caller (in main.py); driver creates ADCs.
+    - Supports flexible board index mapping (physical sensor indices printed on the board).
+    - Uses read_timed_multi() for calibration; read() uses single-shot for low overhead.
+    """
+# ----------------------------------------------------------------------
+    def __init__(self,
+                 pins,
+                 tim: Timer,
+                 samples: int = 100,
+                 sensor_indices=None):
+        """
+        Args:
+            pins: list of Pin.cpu.<X> constants (order: left -> right across the robot)
+            tim:  Timer configured with a sampling frequency for calibration
+            samples: number of samples to average in calibration
+            sensor_indices: optional list of physical board indices corresponding to the pins list
+                            (example: [1,3,5,7,9,11] if only odd sensors are populated)
+                            If None, indices default to [1..N] in the given order.
+        """
         self.tim = tim
-        self.samples = samples
+        self.samples = int(samples)
+        # Create ADCs internally in the driver from pins specified in main.py
+        self.adcs = [ADC(Pin(p)) for p in pins]
         self.num = len(self.adcs)
-        self.black = [0] * self.num
-        self.white = [0] * self.num
-        # Default indices (1..N) if not given
-        self.sensor_index = sensor_index if sensor_index else list(range(1, self.num + 1))
+
+        # Indices used for centroid math (center = (min(idx)+max(idx))/2)
+        if sensor_indices is None:
+            self.sensor_index = list(range(1, self.num + 1))
+        else:
+            if len(sensor_indices) != self.num:
+                raise ValueError("sensor_indices length must match pins length")
+            self.sensor_index = list(sensor_indices)
+
+        # Calibration data
+        self.black = [0.0] * self.num
+        self.white = [0.0] * self.num
+
+        # Last normalized read (0..1 where 1 ~ black line)
         self.norm = [0.0] * self.num
 
+    # ----------------------------------------------------------------------
     def calibrate(self, color: str):
-        import array
+        """
+        Calibrate on 'w' (white background) or 'b' (black line).
+        Uses read_timed_multi() to fill per-channel buffers and averages them.
+        Prints a compact table of per-sensor averages for visual verification.
+        Returns the list of averages (float) in the same order as sensor_index.
+        """
         bufs = [array.array('H', [0] * self.samples) for _ in range(self.num)]
-        from pyb import ADC
         ADC.read_timed_multi(tuple(self.adcs), tuple(bufs), self.tim)
         avgs = [sum(b) / len(b) for b in bufs]
-        target = self.black if color == 'b' else self.white
-        for i, val in enumerate(avgs):
-            target[i] = val
 
+        if color == 'b':
+            for i, v in enumerate(avgs):
+                self.black[i] = float(v)
+            label = "BLACK"
+        else:
+            for i, v in enumerate(avgs):
+                self.white[i] = float(v)
+            label = "WHITE"
+
+        print("\r\n[IR CALIBRATION] {} averages:".format(label))
+        print(" Index | Average (counts)")
+        print("-------+------------------")
+        for idx, val in zip(self.sensor_index, avgs):
+            print(f" {idx:5d} | {val:7.1f}")
+        print(f"  min  | {min(avgs):7.1f}")
+        print(f"  max  | {max(avgs):7.1f}")
+        print("")
+
+        return avgs
+    
+    # ----------------------------------------------------------------------
     def read(self):
-        raw = [adc.read() for adc in self.adcs]
-        self.norm = []
-        for i, r in enumerate(raw):
-            b, w = self.black[i], self.white[i]
-            denom = b - w
+        """
+        Single-shot read on all channels, normalized to [0,1].
+        0 ~ white (background), 1 ~ black (line).
+        Returns list of floats, same order as pins / sensor_index.
+        """
+        out = []
+        for i, adc in enumerate(self.adcs):
+            r = adc.read()
+            b = self.black[i]
+            w = self.white[i]
+            denom = (b - w)
             n = (r - w) / denom if denom != 0 else 0.0
-            n = min(max(n, 0.0), 1.0)
-            self.norm.append(n)
+            if n < 0.0: n = 0.0
+            if n > 1.0: n = 1.0
+            out.append(n)
+        self.norm = out
         return self.norm
 
+    # ----------------------------------------------------------------------
     def get_centroid(self):
+        """
+        Compute centroid using the last normalized vector (or perform a read).
+        Returns:
+            (centroid, seen)
+            centroid: float in the index space (not 0..1; uses sensor_index values)
+            seen: bool indicating if any signal was seen (sum(norm) > small eps)
+        """
         self.read()
-        weighted_sum = sum(idx * val for idx, val in zip(self.sensor_index, self.norm))
         total = sum(self.norm)
-        return weighted_sum / total if total != 0 else 0.0
+        if total <= 1e-6:
+            return 0.0, False
 
-        
+        weighted = 0.0
+        for idx, val in zip(self.sensor_index, self.norm):
+            weighted += idx * val
+
+        return (weighted / total), True
+
+    # ----------------------------------------------------------------------
+    def center_index(self):
+        """
+        Returns the ideal center location in index space.
+        For arbitrary index sets, use average of min and max (center of span).
+        """
+        return 0.5 * (min(self.sensor_index) + max(self.sensor_index))

@@ -44,10 +44,13 @@ user_prompt = '''\r\nCommand keys:
     r      : Run automated sequence (0 to 100% by 10%)
     x      : Plot all runs' left velocity
     s      : Stream data
-    ----  o      : Override existing run
-    m      : Toggle mode (Set to straight by default)
-    d      : Print CSV data to Terminal
+    m      : Toggle driving mode (straight/pivot/arc)
+    d      : Save latest run to CSV and plot PNG
     c      : Run automated closed-loop test
+    w      : IR white calibration (prints table from Nucleo USB REPL)
+    b      : IR black calibration (prints table from Nucleo USB REPL)
+    l      : Toggle line-following (outer loop on/off)
+    v      : Query battery voltage (prints to this terminal)
     h      : Help / show this menu
     ctrl-c : Interrupt this program\r\n'''
 
@@ -247,7 +250,6 @@ def auto_run_sequence(efforts):
                 print(f"Automated test is finished ({run_count} runs completed). Hit 'x' to plot data.")
 
 
-
     except KeyboardInterrupt:
         print("\nAutomated sequence interrupted by user (Ctrl-C). Sending kill and closing serial port.")
         try:
@@ -264,7 +266,6 @@ def auto_run_sequence(efforts):
                     print("Serial port closed.")
         finally:
             return
-
 
 
 # Function to run an automated closed-loop test
@@ -485,6 +486,50 @@ while True:
                         print(f"Proportional gain set to {kp}")
                     except ValueError:
                         print("Invalid input. Please enter a number.")
+            
+            elif key == 'w':
+                # IR white calibration (Nucleo will print the table to USB REPL;
+                # some prints may also echo here if your firmware routes them)
+                if running or streaming:
+                    print("Cannot calibrate while running/streaming")
+                else:
+                    ser.write(b'w')
+                    print("Sent IR WHITE calibration command. Check USB PuTTY for the calibration table.")
+
+            elif key == 'b':
+                # IR black calibration
+                if running or streaming:
+                    print("Cannot calibrate while running/streaming")
+                else:
+                    ser.write(b'b')
+                    print("Sent IR BLACK calibration command. Check USB PuTTY for the calibration table.")
+
+            elif key == 'l':
+                # Toggle line-following enable
+                if running:
+                    print("Cannot toggle line-follow while test is running")
+                elif streaming:
+                    print("Cannot toggle line-follow while streaming")
+                else:
+                    ser.write(b'l')
+                    print("Toggled line-following (outer loop).")
+
+            elif key == 'v':
+                # Request battery voltage (firmware will respond with a number and newline)
+                if streaming:
+                    print("Battery query deferred (currently streaming)")
+                else:
+                    ser.write(b'v')
+                    # try to read a short reply
+                    sleep(0.05)
+                    try:
+                        line = ser.readline().decode().strip()
+                        if line:
+                            print(f"Battery voltage: {line} V")
+                        else:
+                            print("Requested battery voltage; waiting for response...")
+                    except Exception:
+                        print("Requested battery voltage.")
 
             elif key == 'd':
                 # Plot and save the latest run's motor_data to CSV
@@ -642,7 +687,7 @@ while True:
                     #     streaming = False
                     #     done = False
                     else:
-                        if line_num <= size - 4:
+                        if line_num <= size - 5:
                             # Read line by line
                             try:
                                 spam = ser.readline().decode().strip().split(",")

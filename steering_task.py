@@ -1,18 +1,26 @@
 # steering_task.py
 # ==============================================================================
-# SteeringTask
+# SteeringTask (outer loop for closed-loop line following)
 # ------------------------------------------------------------------------------
-# Computes line-following steering efforts based on IR sensor centroid.
+# Uses the IR sensor array to compute a steering correction and publish left
+# right motor VELOCITY setpoints (to maintain the inner closed-loop control)
+# for the MotorControlTask.
 # ==============================================================================
 
 from pyb import millis
 
 class SteeringTask:
-    """Uses IR sensor readings to compute differential efforts for line following."""
+    """Outer-loop controller for closed-loop line following."""
+
+    # FSM States
+    S0_INIT = 0
+    S1_WAIT_ENABLE = 1
+    S2_FOLLOW = 2
+    S3_LOST = 3
 
     def __init__(self, ir_array, battery,
                  lf_enable, ir_cmd,
-                 left_eff_sh, right_eff_sh):
+                 left_sp_sh, right_sp_sh):
         # Hardware
         self.ir = ir_array
         self.battery = battery
@@ -20,46 +28,104 @@ class SteeringTask:
         # Shares
         self.lf_enable = lf_enable
         self.ir_cmd = ir_cmd
-        self.left_eff_sh = left_eff_sh
-        self.right_eff_sh = right_eff_sh
+        self.left_sp_sh = left_sp_sh # share for left motor velocity setpoint
+        self.right_sp_sh = right_sp_sh # share for right motor velocity setpoint
 
-        # Parameters
-        self.Kp_line = 35.0    # proportional steering gain
-        self.base_effort = 40  # base forward effort
+        # Tuning parameters
+        self.Kp_line = 8.0 # proportional steering gain (increase if sluggish, reduce if hunting)
+        self.v_target = 4.0 # forward target [rad/s] (bump up after stable)
+
+        # Derived clamp: v_target + Kp_line * half of index span
+        idx_min = min(self.ir.sensor_index)
+        idx_max = max(self.ir.sensor_index)
+        half_span = 0.5 * (idx_max - idx_min)    # e.g., (11-1)/2 = 5.0
+        self._max_sp = self.v_target + self.Kp_line * half_span
+
+        # Lost-line behavior
+        self.search_speed = 0.5 # fraction of v_target to creep forward while searching
+        self.reacquire_thresh = 0.05  # minimum sum(norm) threshold to consider the line as "seen"
+
+        # FSM state initialization
+        self.state = self.S0_INIT
+
+        # Timing
         self.last_time = millis()
 
-        # FSM state
-        self.state = 0
+    # --------------------------------------------------------------------------
+    ### HELPER FUNCTIONS
+    # --------------------------------------------------------------------------
+    def _clamp(self, x, lo, hi):
+        return lo if x < lo else (hi if x > hi else x)
 
+    # --------------------------------------------------------------------------
+    def _publish(self, v_left, v_right):
+        v_left = self._clamp(v_left, -self._max_sp, self._max_sp)
+        v_right = self._clamp(v_right, -self._max_sp, self._max_sp)
+        self.left_sp_sh.put(v_left)
+        self.right_sp_sh.put(v_right)
+
+    # --------------------------------------------------------------------------
+    ### FINITE STATE MACHINE
+    # --------------------------------------------------------------------------
     def run(self):
-        """Non-blocking cooperative task to compute left/right efforts."""
         while True:
-            # --- Handle calibration commands ---
-            if self.ir_cmd.get() == 1:   # white calibration
+            # Handle calibration commands regardless of FSM state
+            cmd = self.ir_cmd.get()
+            if cmd == 1:   # white calibration
                 print("Calibrating white background...")
                 self.ir.calibrate('w')
                 self.ir_cmd.put(0)
-            elif self.ir_cmd.get() == 2: # black calibration
+            elif cmd == 2: # black calibration
                 print("Calibrating black line...")
                 self.ir.calibrate('b')
                 self.ir_cmd.put(0)
 
-            # --- Only compute when line-follow mode enabled ---
-            if self.lf_enable.get():
-                centroid = self.ir.get_centroid()  # 1–N range
-                error = centroid - (len(self.ir.sensor_index) + 1) / 2  # center offset
+            # FSM actually starts here
+            # S0: INIT ---------------------------------------------------------
+            if self.state == self.S0_INIT:
+                # Nothing special to init beyond being explicit
+                self._publish(0.0, 0.0) # ensure motors are stopped
+                self.state = self.S1_WAIT_ENABLE
 
-                # proportional steering correction
-                correction = self.Kp_line * error
+            # S1: WAIT FOR ENABLE ----------------------------------------------
+            elif self.state == self.S1_WAIT_ENABLE:
+                self._publish(0.0, 0.0) # ensure motors are stopped
+                if self.lf_enable.get(): # if line following enabled
+                    self.state = self.S2_FOLLOW # go to FOLLOW state
 
-                left_effort = self.base_effort + correction
-                right_effort = self.base_effort - correction
+            # S2: FOLLOW LINE -------------------------------------------------
+            elif self.state == self.S2_FOLLOW:
+                if not self.lf_enable.get(): # if line following disabled
+                    self._publish(0.0, 0.0) # ensure motors are stopped
+                    self.state = self.S1_WAIT_ENABLE # go to WAIT ENABLE state
+                else:
+                    centroid, seen = self.ir.get_centroid() # get line centroid
+                    if not seen:
+                        # No line detected -> go to LOST
+                        self.state = self.S3_LOST
+                    else:
+                        center = self.ir.center_index() # ideal centroid index
+                        error = centroid - center # positive if line is to the right
+                        correction = self.Kp_line * error # steering correction
 
-                # Clamp and store to shares
-                left_effort = max(min(left_effort, 100), -100)
-                right_effort = max(min(right_effort, 100), -100)
+                        v_left = self.v_target - correction # correct steering
+                        v_right = self.v_target + correction # correct steering
+                        self._publish(v_left, v_right)
 
-                self.left_eff_sh.put(left_effort)
-                self.right_eff_sh.put(right_effort)
+            # S3: LOST LINE --------------------------------------------------
+            elif self.state == self.S3_LOST:
+                if not self.lf_enable.get(): # if line following disabled
+                    self._publish(0.0, 0.0) # ensure motors are stopped
+                    self.state = self.S1_WAIT_ENABLE # go to WAIT ENABLE state
+                else:
+                    # Gentle creep to reacquire (or set both to 0.0 if you prefer a stop)
+                    v = self.search_speed * self.v_target
+                    self._publish(v, v)
+
+                    # Quick check for line reacquisition
+                    # (use read() to avoid computing centroid every tick)
+                    norm = self.ir.read()
+                    if sum(norm) > self.reacquire_thresh:
+                        self.state = self.S2_FOLLOW
 
             yield self.state

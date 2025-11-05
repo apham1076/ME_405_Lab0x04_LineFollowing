@@ -1,7 +1,7 @@
 # stream_task.py
 #
 # ==============================================================================
-# SteamTask (BLUETOOTH version)
+# StreamTask (BLUETOOTH version)
 # ------------------------------------------------------------------------------
 # Waits for a stream command (stream_data flag) and the data collection
 # completion (col_done flag). Then, buffer data in CSV format over Bluetooth one
@@ -84,16 +84,13 @@ class StreamTask:
                 # Send header line with control mode and parameters
                 if self.control_mode.get():
                     # Header line for velocity mode: mode,setpoint,kp,ki,size
-                    line = f"{mode},{control_val},{self.kp.get()/100:.2f},{self.ki.get()/100:.2f},{_size}\r\n"
+                    line = f"{mode},{control_val},{self.kp.get():.2f},{self.ki.get():.2f},{_size}\r\n"
                 else:
                     # Header line for effort mode: mode,effort,size
                     line = f"{mode},{control_val},{_size}\r\n"
                 self.ser.write(line.encode())
 
                 yield self.state
-
-                # Wait for READY from PC
-
 
                 # while we still have items in queue
                 while self.time_q.any():

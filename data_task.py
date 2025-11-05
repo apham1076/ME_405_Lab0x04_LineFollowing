@@ -8,7 +8,7 @@
 # class, the object lives in memory as a single instance. We can then pass the
 # object to something else, like another task (class object). This allows the
 # other task (class object) to access the same actual instance (object) of this
-# class. Thus, we can referrence the same arrays created in this task as long
+# class. Thus, we can reference the same arrays created in this task as long
 # as we pass the class object to any other tasks where we want to reference the
 # arrays.
 #
