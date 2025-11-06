@@ -33,7 +33,8 @@ class UITask:
                  eff, driving_mode, setpoint, kp, ki, control_mode,
                  uart5, battery,
                  time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q,
-                 lf_enable=None, ir_cmd=None):
+                 ir_cmd,
+                 lf_kp, lf_ki, lf_sp):
         
         # Flags
         self.col_start = col_start
@@ -49,8 +50,11 @@ class UITask:
         self.kp = kp  # Share for proportional gain
         self.ki = ki  # Share for integral gain
         self.control_mode = control_mode  # Share for control mode (effort/velocity/line-follow)
-        self.lf_enable = lf_enable  # Share for line follower enable
         self.ir_cmd = ir_cmd  # Share for IR command
+
+        self.lf_kp = lf_kp  # Share for line follower proportional gain
+        self.lf_ki = lf_ki  # Share for line follower integral gain
+        self.lf_sp = lf_sp  # Share for line follower setpoint
 
         # Serial interface (USB virtual COM port)
         # self.ser = USB_VCP()
@@ -216,10 +220,10 @@ class UITask:
                 elif cmd == 'e':
                     if not self.mtr_enable.get():  # Only allow mode change when motors are off
                         current_mode = self.control_mode.get()
-                        current_mode = (current_mode + 1) % 3  # Cycle through 0, 1, 2
-                        new_mode = current_mode
-                        print("Switching control mode to:", "Velocity" if new_mode == 1 else "Effort" if new_mode == 0 else "Line Following")
+                        new_mode = (current_mode + 1) % 3  # Cycle through 0, 1, 2
                         self.control_mode.put(new_mode)
+                        print("Switching control mode to:", "Velocity" if new_mode == 1 else "Effort" if new_mode == 0 else "Line Following")
+
                 
                 # 's' → STREAM
                 elif cmd == 's':
@@ -261,11 +265,22 @@ class UITask:
                 elif cmd == 'b':   # Calibrate on BLACK line
                     if self.ir_cmd: self.ir_cmd.put(2)
 
-                # elif cmd == 'l':   # Toggle line-follow (on/off)
-                #     if self.lf_enable:
-                #         self.lf_enable.put(0 if self.lf_enable.get() else 1)
-                #         print("Toggled line-follow to:", self.lf_enable.get())
-
+                elif cmd == 'l' and self.ser.any() >= 12:
+                    # Set gains for line-following
+                    try:
+                        # Read 4 digits for Kp and 4 digits for Ki and 4 digits for setpoint
+                        kp_str = self.ser.read(4).decode()
+                        ki_str = self.ser.read(4).decode()
+                        sp_str = self.ser.read(4).decode()
+                        kp = int(kp_str) / 100.0
+                        ki = int(ki_str) / 100.0
+                        sp = int(sp_str)
+                        self.lf_kp.put(kp)
+                        self.lf_ki.put(ki)
+                        self.lf_sp.put(sp)
+                        print(f"Line-following gains set to Kp={kp}, Ki={ki}, Setpoint={sp}")
+                    except ValueError:
+                        print("Invalid line-following gain format received")
 
                 # Anything else → ignore, Shouldn't need to worry about other commmands handled by PC
                 else:

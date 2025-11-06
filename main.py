@@ -124,10 +124,12 @@ def main():
     control_mode.put(0)  # Start in effort mode
 
     # Line following shares...
-    lf_enable = task_share.Share('B', name='LineFollow Enable'); lf_enable.put(0)
     left_sp_sh = task_share.Share('f', name='LF Left Setpoint'); left_sp_sh.put(0.0)
     right_sp_sh = task_share.Share('f', name='LF Right Setpoint'); right_sp_sh.put(0.0)
     ir_cmd = task_share.Share('B', name='IR Calibrate Cmd'); ir_cmd.put(0)
+    lf_kp = task_share.Share('f', name='LineFollow Kp'); lf_kp.put(0.0)
+    lf_ki = task_share.Share('f', name='LineFollow Ki'); lf_ki.put(0.0)
+    lf_sp = task_share.Share('B', name='LineFollow Setpoint'); lf_sp.put(0)
 
     # Boolean flags
     col_start = task_share.Share('B', name='Start Collection Flag')
@@ -145,21 +147,22 @@ def main():
     # -----------------------------------------------------------------------
 
     # Create UART object
-    uart5 = UART(1, 460800)
+    uart = UART(1, 460800)
 
     # Create Task Objects (since tasks are classes)    
     ui_task_obj = UITask(col_start, col_done, mtr_enable, stream_data, abort,
                          eff, driving_mode, setpoint, kp, ki, control_mode,
-                         uart5, battery,
+                         uart, battery,
                          time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q,
-                         lf_enable=lf_enable, ir_cmd=ir_cmd)
+                         ir_cmd,
+                         lf_kp, lf_ki, lf_sp)
 
     motor_task_obj = MotorControlTask(left_motor, right_motor,
                                       left_encoder, right_encoder,
                                       battery,
                                       eff, mtr_enable, abort, driving_mode, setpoint, kp, ki, control_mode,
                                       time_sh, left_pos_sh, right_pos_sh, left_vel_sh, right_vel_sh,
-                                      lf_enable, None, None,
+                                      ir_cmd, None, None,
                                       left_sp_sh, right_sp_sh)
 
     data_task_obj = DataCollectionTask(col_start, col_done,
@@ -167,12 +170,12 @@ def main():
                                        time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q,
                                        time_sh, left_pos_sh, right_pos_sh, left_vel_sh, right_vel_sh)
 
-    stream_task_obj = StreamTask(eff, col_done, stream_data, uart5,
+    stream_task_obj = StreamTask(eff, col_done, stream_data, uart,
                                  time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q,
                                  control_mode, setpoint, kp, ki)
 
     steering_task_obj = SteeringTask(ir_array, battery,
-                                 lf_enable, ir_cmd,
+                                 ir_cmd,
                                  left_sp_sh, right_sp_sh)
 
 

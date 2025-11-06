@@ -49,6 +49,7 @@ user_prompt = '''\r\nCommand keys:
     c      : Run automated closed-loop test
     w      : IR white calibration (prints table from Nucleo USB REPL)
     b      : IR black calibration (prints table from Nucleo USB REPL)
+    l      : Set IR line following gains (lf_kp, lf_ki)
     v      : Query battery voltage (prints to this terminal)
     h      : Help / show this menu
     ctrl-c : Interrupt this program\r\n'''
@@ -345,7 +346,7 @@ except Exception as e:
 
 # Establish Bluetooth connection
 try:
-    ser = Serial('COM8', baudrate=460800, timeout=1)
+    ser = Serial('COM3', baudrate=460800, timeout=1)
 
 except SerialException:
     print("Unable to connect to port")
@@ -434,7 +435,7 @@ while True:
                     print("Cannot set velocity setpoint while test is running")
                 elif streaming:
                     print("Cannot set velocity setpoint while streaming")
-                elif control_mode:
+                elif control_mode != 1:
                     print("Must be in velocity mode to set setpoint")
                 else:
                     try:
@@ -504,15 +505,29 @@ while True:
                     ser.write(b'b')
                     print("Sent IR BLACK calibration command. Check USB PuTTY for the calibration table.")
 
-            # elif key == 'l':
-            #     # Toggle line-following enable
-            #     if running:
-            #         print("Cannot toggle line-follow while test is running")
-            #     elif streaming:
-            #         print("Cannot toggle line-follow while streaming")
-            #     else:
-            #         ser.write(b'l')
-            #         print("Toggled line-following (outer loop).")
+            elif key == 'l':
+                # Set gains for line-following
+                if running:
+                    print("Cannot set line-following gains while test is running")
+                elif streaming:
+                    print("Cannot set line-following gains while streaming")
+                else:
+                    try:
+                        # Get line-following gains from user
+                        lf_kp = input("Enter line-following proportional gain (Kp): ")
+                        lf_kp = float(lf_kp)
+                        lf_ki = input("Enter line-following integral gain (Ki): ")
+                        lf_ki = float(lf_ki)
+                        lf_sp = input("Enter line-following setpoint: ")
+                        # Send line-following gains to Romi - format: 'lppppiiiissss' where pppp is Kp*100 and iiii is Ki*100 and ssss is setpoint
+                        lf_kp_int = int(lf_kp * 100)
+                        lf_ki_int = int(lf_ki * 100)
+                        lf_sp_int = int(lf_sp)
+                        cmd = f"l{abs(lf_kp_int):04d}{abs(lf_ki_int):04d}{abs(lf_sp_int):04d}"
+                        ser.write(cmd.encode())
+                        print(f"Line-following gains set to Kp={lf_kp}, Ki={lf_ki}, Setpoint={lf_sp}")
+                    except ValueError:
+                        print("Invalid input. Please enter numbers for gains.")
 
             elif key == 'v':
                 # Request battery voltage (firmware will respond with a number and newline)
