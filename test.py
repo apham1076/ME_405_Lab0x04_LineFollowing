@@ -358,7 +358,7 @@ except Exception as e:
 
 # Establish Bluetooth connection
 try:
-    ser = Serial('COM8', baudrate=460800, timeout=1)
+    ser = Serial('COM8', baudrate=115200, timeout=1)
 
 except SerialException:
     print("Unable to connect to port")

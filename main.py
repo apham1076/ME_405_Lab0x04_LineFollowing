@@ -144,7 +144,7 @@ def main():
     # -----------------------------------------------------------------------
 
     # Create UART object
-    uart = UART(1, 460800)
+    uart = UART(1, 115200)
 
     # Create Task Objects (since tasks are classes)    
     ui_task_obj = UITask(col_start, col_done, mtr_enable, stream_data, abort,
