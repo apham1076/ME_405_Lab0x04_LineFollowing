@@ -27,8 +27,7 @@ class MotorControlTask:
                  battery,
                  eff, mtr_enable, abort, mode, setpoint, kp, ki, control_mode,
                  time_sh, left_pos_sh, right_pos_sh, left_vel_sh, right_vel_sh,
-                 left_eff_sh=None, right_eff_sh=None,
-                 left_sp_sh=None, right_sp_sh=None):
+                 left_sp_sh, right_sp_sh):
 
         # Hardware
         self.left_motor = left_motor
@@ -44,8 +43,6 @@ class MotorControlTask:
         self.kp = kp
         self.ki = ki
         self.control_mode = control_mode
-        self.left_eff_sh = left_eff_sh
-        self.right_eff_sh = right_eff_sh
         self.left_sp_sh = left_sp_sh
         self.right_sp_sh = right_sp_sh
 

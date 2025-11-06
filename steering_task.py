@@ -19,8 +19,9 @@ class SteeringTask:
     S3_LOST = 3
 
     def __init__(self, ir_array, battery,
-                 ir_cmd,
-                 left_sp_sh, right_sp_sh):
+                 control_mode, ir_cmd,
+                 left_sp_sh, right_sp_sh,
+                 k_line, lf_target):
         # Hardware
         self.ir = ir_array
         self.battery = battery
@@ -29,16 +30,17 @@ class SteeringTask:
         self.ir_cmd = ir_cmd
         self.left_sp_sh = left_sp_sh # share for left motor velocity setpoint
         self.right_sp_sh = right_sp_sh # share for right motor velocity setpoint
+        self.control_mode = control_mode
 
         # Tuning parameters
-        self.Kp_line = 1.0 # proportional steering gain (increase if sluggish, reduce if hunting)
-        self.v_target = 2.0 # forward target [rad/s] (bump up after stable)
+        self.K_line = k_line.get() # proportional steering gain (increase if sluggish, reduce if hunting)
+        self.v_target = lf_target.get() # forward target [rad/s] (bump up after stable)
 
-        # Derived clamp: v_target + Kp_line * half of index span
+        # Derived clamp: v_target + K_line * half of index span
         idx_min = min(self.ir.sensor_index)
         idx_max = max(self.ir.sensor_index)
         half_span = 0.5 * (idx_max - idx_min)    # e.g., (11-1)/2 = 5.0
-        self._max_sp = self.v_target + self.Kp_line * half_span
+        self._max_sp = self.v_target + self.K_line * half_span
 
         # Lost-line behavior
         self.search_speed = 0.5 # fraction of v_target to creep forward while searching
@@ -112,7 +114,7 @@ class SteeringTask:
                         half_span = 0.5 * (idx_max - idx_min) if idx_max > idx_min else 1.0
                         error_norm = error_raw / half_span # -1 (far left) to +1 (far right)
 
-                        correction = self.Kp_line * error_norm # steering correction
+                        correction = self.K_line * error_norm # steering correction
 
                         v_left = self.v_target + correction # correct steering
                         v_right = self.v_target - correction # correct steering

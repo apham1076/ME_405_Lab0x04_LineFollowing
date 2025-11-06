@@ -54,6 +54,11 @@ user_prompt = '''\r\nCommand keys:
     h      : Help / show this menu
     ctrl-c : Interrupt this program\r\n'''
 
+# Function to calibrate IR sensors
+def calibrate_ir_sensors():
+    # Placeholder for IR sensor calibration logic
+    pass
+
 # Function to create dictionary for storing data from one run
 def create_run(control_val, size):
     time = np.zeros(size)
@@ -272,11 +277,18 @@ def auto_run_sequence(efforts):
 def run_closed_loop_test():
     global ser, runs, run_count, current_setpoint, control_mode, streaming, running
 
-    if control_mode:
-        print("Switching to velocity mode for closed-loop test...")
+    if control_mode == 0:
         ser.write(b'e')
-        control_mode = False
         sleep(0.1)
+    elif control_mode == 2:
+        ser.write(b'e')
+        sleep(0.1)
+        ser.write(b'e')
+        sleep(0.1)
+    
+    print("Switching to velocity mode for closed-loop test...")
+    control_mode = 1
+
 
     try:
 
@@ -514,18 +526,22 @@ while True:
                 else:
                     try:
                         # Get line-following gains from user
-                        lf_kp = input("Enter line-following proportional gain (Kp): ")
-                        lf_kp = float(lf_kp)
-                        lf_ki = input("Enter line-following integral gain (Ki): ")
-                        lf_ki = float(lf_ki)
-                        lf_sp = input("Enter line-following setpoint: ")
-                        # Send line-following gains to Romi - format: 'lppppiiiissss' where pppp is Kp*100 and iiii is Ki*100 and ssss is setpoint
-                        lf_kp_int = int(lf_kp * 100)
-                        lf_ki_int = int(lf_ki * 100)
-                        lf_sp_int = int(lf_sp)
-                        cmd = f"l{abs(lf_kp_int):04d}{abs(lf_ki_int):04d}{abs(lf_sp_int):04d}"
+                        kp = input("Enter closed-loop proportional gain (Kp): ")
+                        kp = float(kp)
+                        ki = input("Enter closed-loop integral gain (Ki): ")
+                        ki = float(ki)
+                        k_line = input("Enter line-following proportional gain (K_line): ")
+                        k_line = float(k_line)
+                        v_target = input("Enter line-following target: ")
+                        v_target = float(v_target)
+                        # Send line-following gains to Romi - format: 'lppppiiiilllltttt' where pppp is Kp*100, iiii is Ki*100, llll is K_line*100, and tttt is target
+                        kp_int = int(kp * 100)
+                        ki_int = int(ki * 100)
+                        k_line_int = int(k_line * 100)
+                        v_target_int = int(v_target * 100)
+                        cmd = f"l{kp_int:04d}{ki_int:04d}{k_line_int:04d}{v_target_int:04d}"
                         ser.write(cmd.encode())
-                        print(f"Line-following gains set to Kp={lf_kp}, Ki={lf_ki}, Setpoint={lf_sp}")
+                        print(f"Line-following gains set to Kp={kp}, Ki={ki}, K_line={k_line}, Setpoint={v_target}")
                     except ValueError:
                         print("Invalid input. Please enter numbers for gains.")
 

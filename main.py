@@ -32,7 +32,7 @@
 
 '''
 Bluetooth related changes:
-Bluetooth UART5 is used for UI commands and data streaming.
+Bluetooth UART1 is used for UI commands and data streaming.
 USB serial (REPL) remains active for debug prints.
 '''
 
@@ -127,9 +127,8 @@ def main():
     left_sp_sh = task_share.Share('f', name='LF Left Setpoint'); left_sp_sh.put(0.0)
     right_sp_sh = task_share.Share('f', name='LF Right Setpoint'); right_sp_sh.put(0.0)
     ir_cmd = task_share.Share('B', name='IR Calibrate Cmd'); ir_cmd.put(0)
-    lf_kp = task_share.Share('f', name='LineFollow Kp'); lf_kp.put(0.0)
-    lf_ki = task_share.Share('f', name='LineFollow Ki'); lf_ki.put(0.0)
-    lf_sp = task_share.Share('B', name='LineFollow Setpoint'); lf_sp.put(0)
+    k_line = task_share.Share('f', name='LineFollow K_line'); k_line.put(0.0)
+    lf_target = task_share.Share('f', name='LineFollow Target'); lf_target.put(0.0)
 
     # Boolean flags
     col_start = task_share.Share('B', name='Start Collection Flag')
@@ -155,14 +154,13 @@ def main():
                          uart, battery,
                          time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q,
                          ir_cmd,
-                         lf_kp, lf_ki, lf_sp)
+                         k_line, lf_target)
 
     motor_task_obj = MotorControlTask(left_motor, right_motor,
                                       left_encoder, right_encoder,
                                       battery,
                                       eff, mtr_enable, abort, driving_mode, setpoint, kp, ki, control_mode,
                                       time_sh, left_pos_sh, right_pos_sh, left_vel_sh, right_vel_sh,
-                                      ir_cmd, None, None,
                                       left_sp_sh, right_sp_sh)
 
     data_task_obj = DataCollectionTask(col_start, col_done,
@@ -175,8 +173,9 @@ def main():
                                  control_mode, setpoint, kp, ki)
 
     steering_task_obj = SteeringTask(ir_array, battery,
-                                 ir_cmd,
-                                 left_sp_sh, right_sp_sh)
+                                 control_mode, ir_cmd,
+                                 left_sp_sh, right_sp_sh,
+                                 k_line, lf_target)
 
 
 	# Create costask.Task WRAPPERS. (If trace is enabled for any task, memory will be allocated for state transition tracing, and the application will run out of memory after a while and quit. Therefore, use tracing only for debugging and set trace to False when it's not needed)

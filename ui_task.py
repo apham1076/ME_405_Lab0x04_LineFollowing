@@ -34,7 +34,7 @@ class UITask:
                  uart5, battery,
                  time_q, left_pos_q, right_pos_q, left_vel_q, right_vel_q,
                  ir_cmd,
-                 lf_kp, lf_ki, lf_sp):
+                 k_line, lf_target):
         
         # Flags
         self.col_start = col_start
@@ -49,12 +49,10 @@ class UITask:
         self.setpoint = setpoint  # Share for velocity setpoint
         self.kp = kp  # Share for proportional gain
         self.ki = ki  # Share for integral gain
+        self.k_line = k_line  # Share for line following K_line gain
+        self.lf_target = lf_target  # Share for line following target velocity
         self.control_mode = control_mode  # Share for control mode (effort/velocity/line-follow)
         self.ir_cmd = ir_cmd  # Share for IR command
-
-        self.lf_kp = lf_kp  # Share for line follower proportional gain
-        self.lf_ki = lf_ki  # Share for line follower integral gain
-        self.lf_sp = lf_sp  # Share for line follower setpoint
 
         # Serial interface (USB virtual COM port)
         # self.ser = USB_VCP()
@@ -265,20 +263,23 @@ class UITask:
                 elif cmd == 'b':   # Calibrate on BLACK line
                     if self.ir_cmd: self.ir_cmd.put(2)
 
-                elif cmd == 'l' and self.ser.any() >= 12:
+                elif cmd == 'l' and self.ser.any() >= 16:
                     # Set gains for line-following
                     try:
                         # Read 4 digits for Kp and 4 digits for Ki and 4 digits for setpoint
                         kp_str = self.ser.read(4).decode()
                         ki_str = self.ser.read(4).decode()
-                        sp_str = self.ser.read(4).decode()
+                        kline_str = self.ser.read(4).decode()
+                        target_str = self.ser.read(4).decode()
                         kp = int(kp_str) / 100.0
                         ki = int(ki_str) / 100.0
-                        sp = int(sp_str)
-                        self.lf_kp.put(kp)
-                        self.lf_ki.put(ki)
-                        self.lf_sp.put(sp)
-                        print(f"Line-following gains set to Kp={kp}, Ki={ki}, Setpoint={sp}")
+                        k_line = int(kline_str) / 100.0
+                        v_target = int(target_str) / 100.0
+                        self.kp.put(kp)
+                        self.ki.put(ki)
+                        self.k_line.put(k_line)
+                        self.lf_target.put(v_target)
+                        print(f"Line-following gains set to Kp={kp}, Ki={ki}, K_line={k_line}, Target={v_target}")
                     except ValueError:
                         print("Invalid line-following gain format received")
 
