@@ -27,11 +27,12 @@ run_count = 0               # Number of runs
 override = False            # Set if user wants to overwrite existing run
 _continue = False           # Second option, if user doesn't want to overwrite
 question = False           # Set when option to override is presented
-control_mode = True         # True for effort mode, False for velocity mode
+control_mode = False         # True for effort mode, False for velocity mode
 current_setpoint = 0       # Current velocity setpoint in rad/s
 first = True
 done = False
 mode = 1                    # 1, 2, 3 = straight, pivot, arc
+line_following = 0          # Line following Boolean
 
 user_prompt = '''\r\nCommand keys:
     e      : Toggle between Effort mode and Velocity mode
@@ -346,7 +347,7 @@ except Exception as e:
 
 # Establish Bluetooth connection
 try:
-    ser = Serial('COM8', baudrate=115200, timeout=1)
+    ser = Serial('COM3', baudrate=460800, timeout=1)
 
 except SerialException:
     print("Unable to connect to port")
@@ -513,7 +514,11 @@ while True:
                     print("Cannot toggle line-follow while streaming")
                 else:
                     ser.write(b'l')
-                    print("Toggled line-following (outer loop).")
+                    line_following = (line_following + 1) % 2
+                    if line_following:
+                        print("Toggled line-following on")
+                    else:
+                        print("Toggled line-following off")
 
             elif key == 'v':
                 # Request battery voltage (firmware will respond with a number and newline)
